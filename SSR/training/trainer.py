@@ -327,7 +327,7 @@ class SSRTrainer(object):
         assert total_num_classes==2  # excluding void we have 102 classes
         # assert self.num_valid_semantic_class == np.sum(np.unique(instance_id_to_semantic_label_id) >=0 )
 
-        colour_map_np = label_colormap(total_num_classes)[data.semantic_classes] # select the existing class from total colour map
+        colour_map_np = label_colormap(total_num_classes+1)[data.semantic_classes] # select the existing class from total colour map
         self.colour_map = torch.from_numpy(colour_map_np)
         self.valid_colour_map  = torch.from_numpy(colour_map_np[1:,:]) # exclude the first colour map to colourise rendered segmentation without void index
 
@@ -349,6 +349,7 @@ class SSRTrainer(object):
                                     mode='bilinear').permute(0,2,3,1)
         # depth
         self.train_depth = torch.from_numpy(train_samples["depth"])
+        # TODO: Fix this later
         self.viz_train_depth = np.stack([depth2rgb(dep, min_value=self.near, max_value=self.far) for dep in train_samples["depth"]], axis=0) # [num_test, H, W, 3]
         # process the depth for evaluation purpose
         self.train_depth_scaled = F.interpolate(torch.unsqueeze(self.train_depth, dim=1).float(), 
@@ -1009,7 +1010,7 @@ class SSRTrainer(object):
         # this function assume input is already in log-probabilities 
 
         dataset_type = self.config["experiment"]["dataset_type"]
-        if dataset_type == "replica" or dataset_type == "replica_nyu_cnn" or dataset_type == "scannet":
+        if dataset_type == "replica" or dataset_type == "replica_nyu_cnn" or dataset_type == "scannet" or dataset_type == "human":
             crossentropy_loss = lambda logit, label: CrossEntropyLoss(logit, label-1)  # replica has void class of ID==0, label-1 to shift void class to -1 
         else:
             assert False

@@ -1,8 +1,8 @@
 
 experiment:
-  scene_file: "PATHtoREPLICA/Replica/mesh/room_0/habitat/" # room_0,room_01, etc.
-  save_dir: "PATHtoLOGS"  # where to store ckpts and rendering
-  dataset_dir: "PATHtoRENDERED_REPLICA_DATA"
+  scene_file: "/ssd_scratch/cvit/ishaan/SegNeRF/semantic_info/office_0" # room_0,room_01, etc.
+  save_dir: "/home2/ishaanshah/semantic_nerf/logs"  # where to store ckpts and rendering
+  dataset_dir: "/ssd_scratch/cvit/ishaan/SegNeRF/office_0/Sequence_1"
   convention: "opencv"
   width: 320
   height: 240

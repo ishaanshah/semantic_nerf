@@ -27,7 +27,7 @@ class HumanDataset(Dataset):
         self.img_h = img_h
         self.img_w = img_w
 
-        self.Ts_full = np.loadtxt(traj_file, delimiter=" ").reshape(-1, 4, 4)
+        self.Ts_full = np.loadtxt(traj_file, delimiter=" ").reshape(-1, 3, 4)
 
         self.rgb_list = sorted(glob.glob(self.rgb_dir + '/r_*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-4]))
         self.depth_list = sorted(glob.glob(self.depth_dir + '/r_*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-8]))
@@ -59,7 +59,7 @@ class HumanDataset(Dataset):
                 if self.semantic_instance_dir is not None:
                     instance = cv2.resize(instance, (self.img_w, self.img_h), interpolation=cv2.INTER_NEAREST)
 
-            T_wc = self.Ts_full[idx]
+            T_wc = np.r_[self.Ts_full[idx], np.array([[0, 0, 0, 1]])]
 
             self.train_samples["image"].append(image)
             self.train_samples["depth"].append(depth)
