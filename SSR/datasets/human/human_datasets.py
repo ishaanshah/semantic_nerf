@@ -7,7 +7,7 @@ import cv2
 import imageio
 from imgviz import label_colormap
 
-class ReplicaDatasetCache(Dataset):
+class HumanDataset(Dataset):
     def __init__(self, data_dir, train_ids, test_ids, img_h=None, img_w=None):
 
         traj_file = os.path.join(data_dir, "traj_w_c.txt")
@@ -29,9 +29,9 @@ class ReplicaDatasetCache(Dataset):
 
         self.Ts_full = np.loadtxt(traj_file, delimiter=" ").reshape(-1, 4, 4)
 
-        self.rgb_list = sorted(glob.glob(self.rgb_dir + '/rgb*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-4]))
-        self.depth_list = sorted(glob.glob(self.depth_dir + '/depth*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-4]))
-        self.semantic_list = sorted(glob.glob(self.semantic_class_dir + '/semantic_class_*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-4]))
+        self.rgb_list = sorted(glob.glob(self.rgb_dir + '/r_*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-4]))
+        self.depth_list = sorted(glob.glob(self.depth_dir + '/r_*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-8]))
+        self.semantic_list = sorted(glob.glob(self.semantic_class_dir + '/r_*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-8]))
         if self.semantic_instance_dir is not None:
             self.instance_list = sorted(glob.glob(self.semantic_instance_dir + '/semantic_instance_*.png'), key=lambda file_name: int(file_name.split("_")[-1][:-4]))
 

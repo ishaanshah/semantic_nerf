@@ -80,6 +80,34 @@ class SSRTrainer(object):
 
         self.save_config()
 
+    def set_params_human(self):
+        self.H = self.config["experiment"]["height"]
+        self.W = self.config["experiment"]["width"]
+
+        self.n_pix = self.H * self.W
+        self.aspect_ratio = self.W/self.H
+
+        self.hfov = 40
+        # the pin-hole camera has the same value for fx and fy
+        self.fx = self.W / 2.0 / math.tan(math.radians(self.hfov / 2.0))
+        # self.fy = self.H / 2.0 / math.tan(math.radians(self.yhov / 2.0))
+        self.fy = self.fx
+        self.cx = (self.W - 1.0) / 2.0
+        self.cy = (self.H - 1.0) / 2.0
+        self.near, self.far = self.config["render"]["depth_range"]
+        self.c2w_staticcam = None
+
+        # use scaled size for test and visualisation purpose
+        self.test_viz_factor = int(self.config["render"]["test_viz_factor"])
+        self.H_scaled = self.H//self.test_viz_factor
+        self.W_scaled = self.W//self.test_viz_factor
+        self.fx_scaled = self.W_scaled / 2.0 / math.tan(math.radians(self.hfov / 2.0))
+        # self.fy_scaled = self.H_scaled / 2.0 / math.tan(math.radians(self.yhov / 2.0))
+        self.fy_scaled = self.fx_scaled
+        self.cx_scaled = (self.W_scaled - 1.0) / 2.0
+        self.cy_scaled = (self.H_scaled - 1.0) / 2.0
+
+        self.save_config()
 
     def set_params_scannet(self, data):
         self.H = self.config["experiment"]["height"]
@@ -164,7 +192,139 @@ class SSRTrainer(object):
             annotations = json.load(f)
         instance_id_to_semantic_label_id = np.array(annotations["id_to_label"])
         total_num_classes = len(annotations["classes"])
-        assert total_num_classes==101  # excluding void we have 102 classes
+        assert total_num_classes==2  # excluding void we have 102 classes
+        # assert self.num_valid_semantic_class == np.sum(np.unique(instance_id_to_semantic_label_id) >=0 )
+
+        colour_map_np = label_colormap(total_num_classes)[data.semantic_classes] # select the existing class from total colour map
+        self.colour_map = torch.from_numpy(colour_map_np)
+        self.valid_colour_map  = torch.from_numpy(colour_map_np[1:,:]) # exclude the first colour map to colourise rendered segmentation without void index
+
+        # plot semantic label legend
+        # class_name_string = ["voild"] + [x["name"] for x in annotations["classes"] if x["id"] in np.unique(data.semantic)]
+        class_name_string = ["void"] + [x["name"] for x in annotations["classes"]]
+        legend_img_arr = image_utils.plot_semantic_legend(data.semantic_classes, class_name_string, 
+        colormap=label_colormap(total_num_classes+1), save_path=self.save_dir)
+        # total_num_classes +1 to include void class
+
+        # remap different semantic classes to continuous integers from 0 to num_class-1
+        self.semantic_classes_remap = torch.from_numpy(np.arange(self.num_semantic_class))
+
+        #####training data#####
+        # rgb
+        self.train_image = torch.from_numpy(train_samples["image"])
+        self.train_image_scaled = F.interpolate(self.train_image.permute(0,3,1,2,), 
+                                    scale_factor=1/self.config["render"]["test_viz_factor"], 
+                                    mode='bilinear').permute(0,2,3,1)
+        # depth
+        self.train_depth = torch.from_numpy(train_samples["depth"])
+        self.viz_train_depth = np.stack([depth2rgb(dep, min_value=self.near, max_value=self.far) for dep in train_samples["depth"]], axis=0) # [num_test, H, W, 3]
+        # process the depth for evaluation purpose
+        self.train_depth_scaled = F.interpolate(torch.unsqueeze(self.train_depth, dim=1).float(), 
+                                                            scale_factor=1/self.config["render"]["test_viz_factor"], 
+                                                            mode='bilinear').squeeze(1).cpu().numpy()
+
+        # semantic 
+        self.train_semantic = torch.from_numpy(train_samples["semantic_remap"])
+        self.viz_train_semantic = np.stack([colour_map_np[sem] for sem in self.train_semantic], axis=0) # [num_test, H, W, 3]
+
+        self.train_semantic_clean = torch.from_numpy(train_samples["semantic_remap_clean"])
+        self.viz_train_semantic_clean = np.stack([colour_map_np[sem] for sem in self.train_semantic_clean], axis=0) # [num_test, H, W, 3]
+        
+        # process the clean label for evaluation purpose
+        self.train_semantic_clean_scaled = F.interpolate(torch.unsqueeze(self.train_semantic_clean, dim=1).float(), 
+                                                            scale_factor=1/self.config["render"]["test_viz_factor"], 
+                                                            mode='nearest').squeeze(1)
+        self.train_semantic_clean_scaled = self.train_semantic_clean_scaled.cpu().numpy() - 1 
+        # pose 
+        self.train_Ts = torch.from_numpy(train_samples["T_wc"]).float()
+
+
+        #####test data#####
+        # rgb
+        self.test_image = torch.from_numpy(test_samples["image"])  # [num_test, H, W, 3]
+        # scale the test image for evaluation purpose
+        self.test_image_scaled = F.interpolate(self.test_image.permute(0,3,1,2,), 
+                                            scale_factor=1/self.config["render"]["test_viz_factor"], 
+                                            mode='bilinear').permute(0,2,3,1)
+
+
+        # depth
+        self.test_depth = torch.from_numpy(test_samples["depth"])  # [num_test, H, W]
+        self.viz_test_depth = np.stack([depth2rgb(dep, min_value=self.near, max_value=self.far) for dep in test_samples["depth"]], axis=0) # [num_test, H, W, 3]
+        # process the depth for evaluation purpose
+        self.test_depth_scaled = F.interpolate(torch.unsqueeze(self.test_depth, dim=1).float(), 
+                                                            scale_factor=1/self.config["render"]["test_viz_factor"], 
+                                                            mode='bilinear').squeeze(1).cpu().numpy()
+        # semantic 
+        self.test_semantic = torch.from_numpy(test_samples["semantic_remap"])  # [num_test, H, W]
+
+        self.viz_test_semantic = np.stack([colour_map_np[sem] for sem in self.test_semantic], axis=0) # [num_test, H, W, 3]
+
+        # we only add noise to training images, therefore test images are kept intact. No need for test_remap_clean
+        # process the clean label for evaluation purpose
+        self.test_semantic_scaled = F.interpolate(torch.unsqueeze(self.test_semantic, dim=1).float(), 
+                                                    scale_factor=1/self.config["render"]["test_viz_factor"], 
+                                                    mode='nearest').squeeze(1)
+        self.test_semantic_scaled = self.test_semantic_scaled.cpu().numpy() - 1 # shift void class from value 0 to -1, to match self.ignore_label
+        # pose 
+        self.test_Ts = torch.from_numpy(test_samples["T_wc"]).float()  # [num_test, 4, 4]
+
+        if gpu is True:
+            self.train_image = self.train_image.cuda()
+            self.train_image_scaled = self.train_image_scaled.cuda()
+            self.train_depth = self.train_depth.cuda()
+            self.train_semantic = self.train_semantic.cuda()
+
+            self.test_image = self.test_image.cuda()
+            self.test_image_scaled = self.test_image_scaled.cuda()
+            self.test_depth = self.test_depth.cuda()
+            self.test_semantic = self.test_semantic.cuda()
+            self.colour_map = self.colour_map.cuda()
+            self.valid_colour_map = self.valid_colour_map.cuda()
+
+
+        # set the data sampling paras which need the number of training images
+        if self.no_batching is False: # False means we need to sample from all rays instead of rays from one random image
+            self.i_batch = 0
+            self.rand_idx = torch.randperm(self.num_train*self.H*self.W)
+
+        # add datasets to tfboard for comparison to rendered images
+        self.tfb_viz.tb_writer.add_image('Train/legend', np.expand_dims(legend_img_arr, axis=0), 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Train/rgb_GT', train_samples["image"], 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Train/depth_GT', self.viz_train_depth, 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Train/vis_sem_label_GT', self.viz_train_semantic, 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Train/vis_sem_label_GT_clean', self.viz_train_semantic_clean, 0, dataformats='NHWC')
+
+        self.tfb_viz.tb_writer.add_image('Test/legend', np.expand_dims(legend_img_arr, axis=0), 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Test/rgb_GT', test_samples["image"], 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Test/depth_GT', self.viz_test_depth, 0, dataformats='NHWC')
+        self.tfb_viz.tb_writer.add_image('Test/vis_sem_label_GT', self.viz_test_semantic, 0, dataformats='NHWC')
+
+    def prepare_data_human(self, data, gpu=True):
+        self.ignore_label = -1
+
+        # shift numpy data to torch
+        train_samples = data.train_samples
+        test_samples = data.test_samples
+
+        self.train_ids = data.train_ids
+        self.test_ids = data.test_ids
+        self.mask_ids = data.mask_ids
+
+        self.num_train = data.train_num
+        self.num_test = data.test_num
+
+        # preprocess semantic info
+        self.semantic_classes = torch.from_numpy(data.semantic_classes)
+        self.num_semantic_class = self.semantic_classes.shape[0]  # number of semantic classes, including void class=0
+        self.num_valid_semantic_class = self.num_semantic_class - 1  # exclude void class
+        assert self.num_semantic_class==data.num_semantic_class
+
+        json_class_mapping = os.path.join(self.config["experiment"]["scene_file"], "info_semantic.json")
+        with open(json_class_mapping, "r") as f:
+            annotations = json.load(f)
+        total_num_classes = len(annotations["classes"])
+        assert total_num_classes==2  # excluding void we have 102 classes
         # assert self.num_valid_semantic_class == np.sum(np.unique(instance_id_to_semantic_label_id) >=0 )
 
         colour_map_np = label_colormap(total_num_classes)[data.semantic_classes] # select the existing class from total colour map

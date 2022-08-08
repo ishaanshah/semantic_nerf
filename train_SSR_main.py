@@ -2,6 +2,7 @@ import yaml
 import os
 import argparse
 
+from SSR.datasets.human import human_datasets
 from SSR.datasets.replica import replica_datasets
 from SSR.datasets.scannet import scannet_datasets
 from SSR.datasets.replica_nyu import replica_nyu_cnn_datasets
@@ -18,7 +19,7 @@ def train():
     #                     help='config file name.')
     parser.add_argument('--config_file', type=str, default="/home/shuaifeng/Documents/PhD_Research/CodeRelease/SemanticSceneRepresentations/SSR/configs/SSR_room0_config_test.yaml", 
                     help='config file name.')
-    parser.add_argument('--dataset_type', type=str, default="replica", choices= ["replica", "replica_nyu_cnn", "scannet"], 
+    parser.add_argument('--dataset_type', type=str, default="replica", choices= ["replica", "replica_nyu_cnn", "scannet", "human"], 
                         help='the dataset to be used,')
 
     ### working mode and specific options
@@ -192,7 +193,59 @@ def train():
 
         ssr_trainer.set_params_scannet(scannet_data_loader)
         ssr_trainer.prepare_data_scannet(scannet_data_loader)
+    if args.dataset_type == "human":
+        print("----- Human Dataset -----")
 
+        total_num = 100
+        step = 2
+        train_ids = list(range(0, total_num, step))
+        test_ids = [x+step//2 for x in train_ids]  
+        #add ids to config for later saving.
+        config["experiment"]["train_ids"] = train_ids
+        config["experiment"]["test_ids"] = test_ids
+
+        # Todo: like nerf, creating sprial/test poses. Make training and test poses/ids interleaved
+        human_data_loader = human_datasets.HumanDataset(data_dir=config["experiment"]["dataset_dir"],
+                                                                    train_ids=train_ids, test_ids=test_ids,
+                                                                    img_h=config["experiment"]["height"],
+                                                                    img_w=config["experiment"]["width"])
+
+        print("--------------------")
+        if args.super_resolution:
+            print("Super Resolution Mode! Dense Label Flag is {}, SR Factor is {}".format(args.dense_sr,args.sr_factor))
+            human_data_loader.super_resolve_label(down_scale_factor=args.sr_factor, dense_supervision=args.dense_sr)
+        elif args.label_propagation:
+            print("Label Propagation Mode! Partial labelling percentage is: {} ".format(args.partial_perc))
+            human_data_loader.simulate_user_click_partial(perc=args.partial_perc, load_saved=args.load_saved, visualise_save=args.visualise_save)
+            if  args.sparse_views: # add view-point sampling to partial sampling
+                print("Sparse Viewing Labels Mode under ***Patial Labelling***! Sparse Ratio is ", args.sparse_ratio)
+                human_data_loader.sample_label_maps(sparse_ratio=args.sparse_ratio, random_sample=args.random_sample, load_saved=args.load_saved)
+        elif args.pixel_denoising:
+            print("Pixel-Denoising Mode! Noise Ratio is ", args.pixel_noise_ratio)
+            human_data_loader.add_pixel_wise_noise_label(sparse_views=args.sparse_views,
+                                sparse_ratio=args.sparse_ratio, 
+                                random_sample=args.random_sample,
+                                noise_ratio=args.pixel_noise_ratio, 
+                                visualise_save=args.visualise_save, 
+                                load_saved=args.load_saved)
+        elif args.region_denoising:
+            print("Chair Label Flipping for Region-wise Denoising, Flip ratio is {}, Uniform Sampling is {}".format( args.region_noise_ratio, args.uniform_flip))
+            human_data_loader.add_instance_wise_noise_label(sparse_views=args.sparse_views, sparse_ratio=args.sparse_ratio, random_sample=args.random_sample,
+            flip_ratio=args.region_noise_ratio, uniform_flip=args.uniform_flip, instance_id= args.instance_id, 
+            load_saved=args.load_saved, visualise_save=args.visualise_save,)
+        
+        elif args.sparse_views:
+            if len(args.label_map_ids)>0:
+                print("Use label maps only for selected frames, ", args.label_map_ids)
+                human_data_loader.sample_specific_labels(args.label_map_ids, train_ids)
+            else:
+                print("Sparse Labels Mode! Sparsity Ratio is ", args.sparse_ratio)
+                human_data_loader.sample_label_maps(sparse_ratio=args.sparse_ratio, random_sample=args.random_sample, load_saved=args.load_saved)
+
+        else:
+            print("Standard setup with full dense supervision.")
+        ssr_trainer.set_params_human()
+        ssr_trainer.prepare_data_human(human_data_loader)
     
     # Create nerf model, init optimizer
     ssr_trainer.create_ssr()
